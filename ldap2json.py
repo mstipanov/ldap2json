@@ -74,6 +74,7 @@ class LDAPDirectory(object):
             return None
 
         try:
+            self.connect()
             if 'uidNumber' not in kwargs:
                 msxuid = 1000
                 data = self.search(**{'uidNumber': '*'})
@@ -112,6 +113,7 @@ class LDAPDirectory(object):
         username = res[0][0]
 
         try:
+            self.connect()
             self.dir.simple_bind_s(username, password)
             return res[0]
         except ldap.LDAPError, e:
@@ -135,6 +137,7 @@ class LDAPDirectory(object):
         filter = self.build_filter(**kwargs)
         tries = 0
 
+        self.connect()
         while True:
             tries += 1
 
