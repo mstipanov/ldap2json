@@ -3,7 +3,6 @@
 '''ldap2json acts as a proxy between HTTP GET requests and an LDAP
 directory.  Results are returned to the caller using JSON.'''
 
-import os
 import sys
 import argparse
 import ldap
@@ -17,6 +16,7 @@ import itertools
 import time
 
 from bottle import route,run,request,response,HTTPError
+from base64 import *
 import ldap.modlist as modlist
 
 
@@ -220,7 +220,7 @@ def ldaplogin():
         raise HTTPError(401)
 
     response.content_type = 'application/json'
-    text = json.dumps(res, indent=2)
+    text = json.dumps(res, indent=2, ensure_ascii=False)
 
     # wrap JSON data in function call for JSON responses.
     if callback:
@@ -257,7 +257,7 @@ def ldapsignup():
         raise HTTPError(400)
 
     response.content_type = 'application/json'
-    text = json.dumps(res, indent=2)
+    text = json.dumps(res, indent=2, ensure_ascii=False)
 
     # wrap JSON data in function call for JSON responses.
     if callback:
@@ -304,6 +304,13 @@ def ldapsearch():
         raise HTTPError(404)
 
     response.content_type = 'application/json'
+
+    for r in res:
+        if len(r) > 1:
+            if 'jpegPhoto' in r[1]:
+                if len(r[1]['jpegPhoto']) > 0:
+                    r[1]['jpegPhoto'][0] = b64encode(r[1]['jpegPhoto'][0])
+
     text = json.dumps(res, indent=2)
 
     # wrap JSON data in function call for JSON responses.

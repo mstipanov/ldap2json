@@ -3,7 +3,7 @@
 
 #[ldap]
 #
-#uri = ldap://localhost
+#uris = ldap://localhost
 #basedn = "ou=people, dc=example, dc=com"
 
 #[memcache]
