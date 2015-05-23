@@ -5,20 +5,19 @@ directory.  Results are returned to the caller using JSON.'''
 
 import sys
 import argparse
-import ldap
-import configobj
 import pprint
-import urllib
 import json
-import memcache
 import logging
 import itertools
 import time
-
-from bottle import route,run,request,response,HTTPError
+import hashlib
 from base64 import *
-import ldap.modlist as modlist
 
+import ldap
+import configobj
+import memcache
+from bottle import route,get,post,run,request,response,HTTPError
+import ldap.modlist as modlist
 
 directory = None
 cache = None
@@ -98,7 +97,7 @@ class LDAPDirectory(object):
 
         return None
 
-    def login(self, **kwargs):
+    def login(self, kwargs):
         if not kwargs:
             return None
 
@@ -107,7 +106,7 @@ class LDAPDirectory(object):
 
         password = kwargs.pop("password")
 
-        res = self.search(**kwargs)
+        res = self.search(kwargs)
         if not res:
             return None
         username = res[0][0]
@@ -122,7 +121,28 @@ class LDAPDirectory(object):
 
         return None
 
-    def search(self, **kwargs):
+    def add_attribute(self, dn, key, value):
+        try:
+            self.connect()
+            self.dir.simple_bind_s(self.username, self.password)
+            self.dir.modify_s(dn, [(ldap.MOD_ADD, key, value)])
+            self.dir.unbind_s()
+        except ldap.LDAPError, e:
+            logging.error("Can't connect to LDAP server!")
+            print e
+
+    def update_attribute(self, dn, old, new):
+        try:
+            self.connect()
+            ldif = modlist.modifyModlist(old, new)
+            self.dir.simple_bind_s(self.username, self.password)
+            self.dir.modify_s(dn, ldif)
+            self.dir.unbind_s()
+        except ldap.LDAPError, e:
+            logging.error("Can't connect to LDAP server!")
+            print e
+
+    def search(self, kwargs):
         '''Turns kwargs into an LDAP search filter, executes the search,
         and returns the results.  The keys in kwargs are ANDed together;
         only results meeting *all* criteria will be returned.
@@ -130,6 +150,14 @@ class LDAPDirectory(object):
         If the connection to the LDAP server has been lost, search will try
         to reconnect with exponential backoff.  The wait time between
         reconnection attempts will grow no large than self.maxwait.'''
+
+        returnAttr = None
+        if "returnAttr" in kwargs:
+            returnAttr = kwargs.pop("returnAttr")
+
+        if returnAttr:
+            if not type(returnAttr) is list:
+                returnAttr = [returnAttr]
 
         if not kwargs:
             kwargs = {'objectclass': '*'}
@@ -145,7 +173,8 @@ class LDAPDirectory(object):
                 res = self.dir.search_s(
                     self.basedn,
                     self.scope,
-                    filterstr=filter)
+                    filterstr=filter,
+                    attrlist=returnAttr)
                 return res
             except ldap.SERVER_DOWN:
                 interval = max(1, min(self.maxwait, (tries - 1) * 2))
@@ -205,16 +234,7 @@ def ldaplogin():
     if '_' in request.GET:
         del request.GET['_']
 
-    key = urllib.quote('/ldap/%s/%s' % (
-        directory.basedn,
-        request.urlparts.query,
-    ))
-
-    res = cache.get(key)
-
-    if res is None:
-        res = directory.login(**request.GET)
-        cache.set(key, res)
+    res = directory.login(normalize(request.GET.dict))
 
     if not res:
         raise HTTPError(401)
@@ -265,8 +285,148 @@ def ldapsignup():
 
     return text
 
+@post('/ldap/photo.jpeg')
+def ldap_post_download_jpeg_photo():
+    mail = request.forms.mail
+    jpegPhoto = request.files.jpegPhoto
+    if mail and jpegPhoto and jpegPhoto.file:
+        res = directory.search(normalize({"mail": mail, "returnAttr": ["carLicense", "jpegPhoto"]}))
+        if res:
+            dn = None
+            oldJpegPhoto = None
+            oldJpegPhotoMD5 = None
+            for r in res:
+                if len(r) > 1:
+                    dn = r[0]
+                    if 'jpegPhoto' in r[1]:
+                        if len(r[1]['jpegPhoto']) > 0:
+                            oldJpegPhoto = r[1]['jpegPhoto'][0]
+                    if 'carLicense' in r[1]:
+                        if len(r[1]['carLicense']) > 0:
+                            oldJpegPhotoMD5 = r[1]['carLicense'][0]
+            if not dn:
+                raise HTTPError(400)
 
-@route('/ldap')
+            raw = jpegPhoto.file.read() # This is dangerous for big files
+            if not oldJpegPhoto:
+                directory.add_attribute(dn, 'jpegPhoto', raw)
+            else:
+                directory.update_attribute(dn, {'jpegPhoto': oldJpegPhoto}, {'jpegPhoto': raw})
+
+            hash_object = hashlib.md5(raw)
+            newMD5 = hash_object.hexdigest()
+            if not oldJpegPhotoMD5:
+                directory.add_attribute(dn, 'carLicense', newMD5)
+            else:
+                directory.update_attribute(dn, {'carLicense': oldJpegPhotoMD5}, {'carLicense': newMD5})
+
+            response.content_type = 'application/json'
+            text = json.dumps({"md5": newMD5, "filename": jpegPhoto.filename}, indent=2, ensure_ascii=False)
+            return text
+
+    raise HTTPError(400)
+
+@get('/ldap/photo.jpeg')
+def ldap_get_download_jpeg_photo():
+    '''This method is where web clients interact with ldap2json.  Any
+    request parameters are turned into an LDAP filter, and results are JSON
+    encoded and returned to the caller.'''
+
+    global directory
+    global config
+
+    callback = None
+
+    # This supports JSONP requests, which require that the JSON
+    # data be wrapped in a function call specified by the
+    # callback parameter.
+    if 'callback' in request.GET:
+        callback = request.GET['callback']
+        del request.GET['callback']
+
+    # jquery adds this to JSONP requests to prevent caching.
+    if '_' in request.GET:
+        del request.GET['_']
+
+    mail = None
+    if 'mail' in request.GET:
+        mail = request.GET['mail']
+    if not mail:
+        raise HTTPError(400)
+
+    md5 = None
+    if 'md5' in request.GET:
+        md5 = request.GET['md5']
+
+    jpegPhotoMD5 = None
+    if md5:
+        res = directory.search(normalize({"mail": mail, "returnAttr": ["carLicense"]}))
+        if not res:
+            raise HTTPError(404)
+
+        for r in res:
+            if len(r) > 1:
+                if 'carLicense' in r[1]:
+                    if len(r[1]['carLicense']) > 0:
+                        jpegPhotoMD5 = r[1]['carLicense'][0]
+
+        if md5 == jpegPhotoMD5:
+            raise HTTPError(204)
+
+    res = directory.search(normalize({"mail": mail, "returnAttr": ["jpegPhoto"]}))
+    if not res:
+        raise HTTPError(404)
+
+    jpegPhoto = None
+    dn = None
+    for r in res:
+        if len(r) > 1:
+            dn = r[0]
+            if 'jpegPhoto' in r[1]:
+                if len(r[1]['jpegPhoto']) > 0:
+                    jpegPhoto = r[1]['jpegPhoto'][0]
+                    r[1]['jpegPhoto'][0] = None
+
+    if not jpegPhoto:
+        raise HTTPError(404)
+
+    hash_object = hashlib.md5(jpegPhoto)
+    newMD5 = hash_object.hexdigest()
+
+    if not jpegPhotoMD5:
+        directory.add_attribute(dn, 'carLicense', newMD5)
+    elif not newMD5 == jpegPhotoMD5:
+        directory.update_attribute(dn, {'carLicense': jpegPhotoMD5}, {'carLicense': newMD5})
+
+    response.content_type = 'image/jpeg; charset=UTF-8'
+    response.headers['Content-Disposition'] = 'attachment; filename="avatar.jpeg"'
+    response.headers['Content-MD5'] = newMD5
+
+    return jpegPhoto
+
+    # res = directory.signup(normalize(request.GET.dict))
+
+    # if not res:
+    #     raise HTTPError(400)
+
+    # response.content_type = 'application/json'
+    # text = json.dumps(res, indent=2, ensure_ascii=False)
+
+    # wrap JSON data in function call for JSON responses.
+    # if callback:
+    #     text = '%s(%s)' % (callback, text)
+
+    # response.headers['Content-Type'] = 'image/jpeg; charset=UTF-8'
+    # response.headers['Content-Disposition'] = 'attachment; filename="avatar.jpeg"'
+
+    # jpeg_photo = "blah"
+    #
+    # return jpeg_photo
+
+    # Same MD5, not returning image
+    # raise HTTPError(204)
+
+@route('/ldap/')
 def ldapsearch():
     '''This method is where web clients interact with ldap2json.  Any
     request parameters are turned into an LDAP filter, and results are JSON
@@ -289,16 +449,7 @@ def ldapsearch():
     if '_' in request.GET:
         del request.GET['_']
 
-    key = urllib.quote('/ldap/%s/%s' % (
-        directory.basedn,
-        request.urlparts.query,
-    ))
-
-    res = cache.get(key)
-
-    if res is None:
-        res = directory.search(**request.GET)
-        cache.set(key, res)
+    res = directory.search(normalize(request.GET.dict))
 
     if not res:
         raise HTTPError(404)
