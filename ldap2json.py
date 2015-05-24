@@ -290,7 +290,7 @@ def ldap_post_download_jpeg_photo():
     mail = request.forms.mail
     jpegPhoto = request.files.jpegPhoto
     if mail and jpegPhoto and jpegPhoto.file:
-        res = directory.search(normalize({"mail": mail, "returnAttr": ["carLicense", "jpegPhoto"]}))
+        res = directory.search(normalize({"mail": mail, "returnAttr": ["loudJpegPhotoMD5", "jpegPhoto"]}))
         if res:
             dn = None
             oldJpegPhoto = None
@@ -301,9 +301,9 @@ def ldap_post_download_jpeg_photo():
                     if 'jpegPhoto' in r[1]:
                         if len(r[1]['jpegPhoto']) > 0:
                             oldJpegPhoto = r[1]['jpegPhoto'][0]
-                    if 'carLicense' in r[1]:
-                        if len(r[1]['carLicense']) > 0:
-                            oldJpegPhotoMD5 = r[1]['carLicense'][0]
+                    if 'loudJpegPhotoMD5' in r[1]:
+                        if len(r[1]['loudJpegPhotoMD5']) > 0:
+                            oldJpegPhotoMD5 = r[1]['loudJpegPhotoMD5'][0]
             if not dn:
                 raise HTTPError(400)
 
@@ -316,9 +316,9 @@ def ldap_post_download_jpeg_photo():
             hash_object = hashlib.md5(raw)
             newMD5 = hash_object.hexdigest()
             if not oldJpegPhotoMD5:
-                directory.add_attribute(dn, 'carLicense', newMD5)
+                directory.add_attribute(dn, 'loudJpegPhotoMD5', newMD5)
             else:
-                directory.update_attribute(dn, {'carLicense': oldJpegPhotoMD5}, {'carLicense': newMD5})
+                directory.update_attribute(dn, {'loudJpegPhotoMD5': oldJpegPhotoMD5}, {'loudJpegPhotoMD5': newMD5})
 
             response.content_type = 'application/json'
             text = json.dumps({"md5": newMD5, "filename": jpegPhoto.filename}, indent=2, ensure_ascii=False)
@@ -360,15 +360,15 @@ def ldap_get_download_jpeg_photo():
 
     jpegPhotoMD5 = None
     if md5:
-        res = directory.search(normalize({"mail": mail, "returnAttr": ["carLicense"]}))
+        res = directory.search(normalize({"mail": mail, "returnAttr": ["loudJpegPhotoMD5"]}))
         if not res:
             raise HTTPError(404)
 
         for r in res:
             if len(r) > 1:
-                if 'carLicense' in r[1]:
-                    if len(r[1]['carLicense']) > 0:
-                        jpegPhotoMD5 = r[1]['carLicense'][0]
+                if 'loudJpegPhotoMD5' in r[1]:
+                    if len(r[1]['loudJpegPhotoMD5']) > 0:
+                        jpegPhotoMD5 = r[1]['loudJpegPhotoMD5'][0]
 
         if md5 == jpegPhotoMD5:
             raise HTTPError(204)
@@ -394,9 +394,9 @@ def ldap_get_download_jpeg_photo():
     newMD5 = hash_object.hexdigest()
 
     if not jpegPhotoMD5:
-        directory.add_attribute(dn, 'carLicense', newMD5)
+        directory.add_attribute(dn, 'loudJpegPhotoMD5', newMD5)
     elif not newMD5 == jpegPhotoMD5:
-        directory.update_attribute(dn, {'carLicense': jpegPhotoMD5}, {'carLicense': newMD5})
+        directory.update_attribute(dn, {'loudJpegPhotoMD5': jpegPhotoMD5}, {'loudJpegPhotoMD5': newMD5})
 
     response.content_type = 'image/jpeg; charset=UTF-8'
     response.headers['Content-Disposition'] = 'attachment; filename="avatar.jpeg"'
