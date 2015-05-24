@@ -97,6 +97,38 @@ class LDAPDirectory(object):
 
         return None
 
+    def link_device(self, mail, deviceId):
+        res = self.search({"mail": mail}, sudo=True)
+        if not res:
+            return None
+
+        dn = None
+        oldDeviceId = None
+        oldPassword = None
+        for r in res:
+            if len(r) > 1:
+                dn = r[0]
+                if 'loudDeviceId' in r[1]:
+                    if len(r[1]['loudDeviceId']) > 0:
+                        oldDeviceId = r[1]['loudDeviceId'][0]
+                if 'userPassword' in r[1]:
+                    if len(r[1]['userPassword']) > 0:
+                        oldPassword = r[1]['userPassword'][0]
+        if not dn:
+            raise HTTPError(400)
+
+        if not oldDeviceId:
+            self.add_attribute(dn, 'loudDeviceId', deviceId)
+        else:
+            self.update_attribute(dn, {'loudDeviceId': oldDeviceId}, {'loudDeviceId': deviceId})
+
+        if not oldPassword:
+            self.add_attribute(dn, 'userPassword', deviceId)
+        else:
+            self.update_attribute(dn, {'userPassword': oldPassword}, {'userPassword': deviceId})
+
+        return self.search({"mail": mail})
+
     def login(self, kwargs):
         if not kwargs:
             return None
@@ -142,7 +174,7 @@ class LDAPDirectory(object):
             logging.error("Can't connect to LDAP server!")
             print e
 
-    def search(self, kwargs):
+    def search(self, kwargs, sudo=False):
         '''Turns kwargs into an LDAP search filter, executes the search,
         and returns the results.  The keys in kwargs are ANDed together;
         only results meeting *all* criteria will be returned.
@@ -170,11 +202,17 @@ class LDAPDirectory(object):
             tries += 1
 
             try:
+                if sudo:
+                    self.dir.simple_bind_s(self.username, self.password)
+
                 res = self.dir.search_s(
                     self.basedn,
                     self.scope,
                     filterstr=filter,
                     attrlist=returnAttr)
+
+                if sudo:
+                    self.dir.unbind_s()
                 return res
             except ldap.SERVER_DOWN:
                 interval = max(1, min(self.maxwait, (tries - 1) * 2))
@@ -272,6 +310,56 @@ def ldapsignup():
         del request.GET['_']
 
     res = directory.signup(normalize(request.GET.dict))
+
+    if not res:
+        raise HTTPError(400)
+
+    response.content_type = 'application/json'
+    text = json.dumps(res, indent=2, ensure_ascii=False)
+
+    # wrap JSON data in function call for JSON responses.
+    if callback:
+        text = '%s(%s)' % (callback, text)
+
+    return text
+
+@route('/ldap/device/link')
+def ldap_link_device():
+    '''This method is where web clients interact with ldap2json.  Any
+    request parameters are turned into an LDAP filter, and results are JSON
+    encoded and returned to the caller.'''
+
+    global directory
+    global config
+
+    callback = None
+
+    # This supports JSONP requests, which require that the JSON
+    # data be wrapped in a function call specified by the
+    # callback parameter.
+    if 'callback' in request.GET:
+        callback = request.GET['callback']
+        del request.GET['callback']
+
+    # jquery adds this to JSONP requests to prevent caching.
+    if '_' in request.GET:
+        del request.GET['_']
+
+    deviceId = None
+    if 'deviceId' in request.GET:
+        deviceId = request.GET['deviceId']
+
+    if not deviceId:
+        raise HTTPError(400)
+
+    mail = None
+    if 'mail' in request.GET:
+        mail = request.GET['mail']
+
+    if not mail:
+        raise HTTPError(400)
+
+    res = directory.link_device(mail, deviceId)
 
     if not res:
         raise HTTPError(400)
