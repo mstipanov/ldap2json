@@ -456,11 +456,13 @@ def ldapsearch():
 
     response.content_type = 'application/json'
 
+    # TODO: investigate how to ignore jpegPhoto
     for r in res:
         if len(r) > 1:
             if 'jpegPhoto' in r[1]:
                 if len(r[1]['jpegPhoto']) > 0:
-                    r[1]['jpegPhoto'][0] = b64encode(r[1]['jpegPhoto'][0])
+                    # r[1]['jpegPhoto'][0] = b64encode(r[1]['jpegPhoto'][0])
+                    r[1]['jpegPhoto'][0] = None
 
     text = json.dumps(res, indent=2)
 
