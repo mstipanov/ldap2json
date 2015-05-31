@@ -11,12 +11,11 @@ import logging
 import itertools
 import time
 import hashlib
-from base64 import *
 
 import ldap
 import configobj
 import memcache
-from bottle import route,get,post,run,request,response,HTTPError
+from bottle import route,get,post,run,request,response,HTTPError,static_file
 import ldap.modlist as modlist
 
 directory = None
@@ -374,7 +373,7 @@ def ldap_link_device():
     return text
 
 @post('/ldap/photo.jpeg')
-def ldap_post_download_jpeg_photo():
+def ldap_post_upload_jpeg_photo():
     mail = request.forms.mail
     jpegPhoto = request.files.jpegPhoto
     if mail and jpegPhoto and jpegPhoto.file:
@@ -492,27 +491,47 @@ def ldap_get_download_jpeg_photo():
 
     return jpegPhoto
 
-    # res = directory.signup(normalize(request.GET.dict))
+@get('/ldap/video/md5/<id>')
+def get_video_md5(id):
+    from os import listdir
+    from os.path import isfile, join
 
-    # if not res:
-    #     raise HTTPError(400)
+    root_dir = '/var/videos/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
 
-    # response.content_type = 'application/json'
-    # text = json.dumps(res, indent=2, ensure_ascii=False)
+    for f in onlyfiles:
+        if f.endswith(".md5"):
+            return static_file(f, root=root_dir)
 
-    # wrap JSON data in function call for JSON responses.
-    # if callback:
-    #     text = '%s(%s)' % (callback, text)
+    raise HTTPError(404)
 
-    # response.headers['Content-Type'] = 'image/jpeg; charset=UTF-8'
-    # response.headers['Content-Disposition'] = 'attachment; filename="avatar.jpeg"'
+@get('/ldap/video/name/<id>')
+def get_video_name(id):
+    from os import listdir
+    from os.path import isfile, join
 
-    # jpeg_photo = "blah"
-    #
-    # return jpeg_photo
+    root_dir = '/var/videos/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
 
-    # Same MD5, not returning image
-    # raise HTTPError(204)
+    for f in onlyfiles:
+        if not f.endswith(".md5"):
+            return f
+
+    raise HTTPError(404)
+
+@get('/ldap/video/content/<id>')
+def get_video_content(id):
+    from os import listdir
+    from os.path import isfile, join
+
+    root_dir = '/var/videos/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
+
+    for f in onlyfiles:
+        if not f.endswith(".md5"):
+            return static_file(f, root=root_dir)
+
+    raise HTTPError(404)
 
 @route('/ldap/')
 def ldapsearch():
