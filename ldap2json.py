@@ -491,6 +491,17 @@ def ldap_get_download_jpeg_photo():
 
     return jpegPhoto
 
+@get('/ldap/videos')
+def get_videos():
+    from os import listdir
+    from os.path import isdir, join
+
+    root_dir = '/var/videos/'
+    onlydirs = [f for f in listdir(root_dir) if isdir(join(root_dir, f))]
+
+    response.content_type = 'application/json'
+    return json.dumps(onlydirs, indent=2, ensure_ascii=False)
+
 @get('/ldap/video/md5/<id>')
 def get_video_md5(id):
     from os import listdir
@@ -525,6 +536,59 @@ def get_video_content(id):
     from os.path import isfile, join
 
     root_dir = '/var/videos/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
+
+    for f in onlyfiles:
+        if not f.endswith(".md5"):
+            return static_file(f, root=root_dir)
+
+    raise HTTPError(404)
+
+@get('/ldap/documents')
+def get_documents():
+    from os import listdir
+    from os.path import isdir, join
+
+    root_dir = '/var/documents/'
+    onlydirs = [f for f in listdir(root_dir) if isdir(join(root_dir, f))]
+
+    response.content_type = 'application/json'
+    return json.dumps(onlydirs, indent=2, ensure_ascii=False)
+
+@get('/ldap/document/md5/<id>')
+def get_document_md5(id):
+    from os import listdir
+    from os.path import isfile, join
+
+    root_dir = '/var/documents/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
+
+    for f in onlyfiles:
+        if f.endswith(".md5"):
+            return static_file(f, root=root_dir)
+
+    raise HTTPError(404)
+
+@get('/ldap/document/name/<id>')
+def get_document_name(id):
+    from os import listdir
+    from os.path import isfile, join
+
+    root_dir = '/var/documents/' + id
+    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
+
+    for f in onlyfiles:
+        if not f.endswith(".md5"):
+            return f
+
+    raise HTTPError(404)
+
+@get('/ldap/document/content/<id>')
+def get_document_content(id):
+    from os import listdir
+    from os.path import isfile, join
+
+    root_dir = '/var/documents/' + id
     onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
 
     for f in onlyfiles:
