@@ -547,55 +547,28 @@ def get_video_content(id):
 @get('/ldap/documents')
 def get_documents():
     from os import listdir
-    from os.path import isdir, join
+    from os.path import isdir, isfile, join
 
     root_dir = '/var/documents/'
-    onlydirs = [f for f in listdir(root_dir) if isdir(join(root_dir, f))]
+    result = []
+    onlydirs = [d for d in listdir(root_dir) if isdir(join(root_dir, d))]
+
+    for d in onlydirs:
+        files = [f for f in listdir(join(root_dir, d)) if isfile(join(join(root_dir, d), f))]
+        result.append({"dir": d, "files": files})
 
     response.content_type = 'application/json'
-    return json.dumps(onlydirs, indent=2, ensure_ascii=False)
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
-@get('/ldap/document/md5/<id>')
-def get_document_md5(id):
-    from os import listdir
+@get('/ldap/document/content/<dir_id>/<file_name>')
+def get_document_content(dir_id, file_name):
     from os.path import isfile, join
 
-    root_dir = '/var/documents/' + id
-    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
+    root_dir = '/var/documents/' + dir_id
+    if not isfile(join(root_dir, file_name)):
+        raise HTTPError(404)
 
-    for f in onlyfiles:
-        if f.endswith(".md5"):
-            return static_file(f, root=root_dir)
-
-    raise HTTPError(404)
-
-@get('/ldap/document/name/<id>')
-def get_document_name(id):
-    from os import listdir
-    from os.path import isfile, join
-
-    root_dir = '/var/documents/' + id
-    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
-
-    for f in onlyfiles:
-        if not f.endswith(".md5"):
-            return f
-
-    raise HTTPError(404)
-
-@get('/ldap/document/content/<id>')
-def get_document_content(id):
-    from os import listdir
-    from os.path import isfile, join
-
-    root_dir = '/var/documents/' + id
-    onlyfiles = [f for f in listdir(root_dir) if isfile(join(root_dir, f))]
-
-    for f in onlyfiles:
-        if not f.endswith(".md5"):
-            return static_file(f, root=root_dir)
-
-    raise HTTPError(404)
+    return static_file(file_name, root=root_dir)
 
 @route('/ldap/')
 def ldapsearch():
